@@ -25,7 +25,6 @@ static void usage(void)
     fputs(_(
         "--interface=<if> (-i <if>): bind interface <if>\n"
         "--srcip=<ip> (-s <ip>): source (real) IP address of that host\n"
-        "--mcast=<ip> (-m <ip>): multicast group IP address (default 224.0.0.18)\n"
         "--vhid=<id> (-v <id>): virtual IP identifier (1-255)\n"
         "--pass=<pass> (-p <pass>): password\n"
         "--passfile=<file> (-o <file>): read password from file\n"
@@ -36,15 +35,16 @@ static void usage(void)
         "--advbase=<seconds> (-b <seconds>): advertisement frequency\n"
         "--advskew=<skew> (-k <skew>): advertisement skew (0-255)\n"
         "--upscript=<file> (-u <file>): run <file> to become a master\n"
+        "--upadvert=<file> (-t <file>): run <file> for advertisement\n"
         "--downscript=<file> (-d <file>): run <file> to become a backup\n"
         "--deadratio=<ratio> (-r <ratio>): ratio to consider a host as dead\n"
-        "--debug (-D: enable debug output\n"
         "--shutdown (-z): call shutdown script at exit\n"
         "--daemonize (-B): run in background\n"
         "--ignoreifstate (-S): ignore interface state (down, no carrier)\n"
         "--nomcast (-M): use broadcast (instead of multicast) advertisements\n"
         "--facility=<facility> (-f): set syslog facility (default=daemon)\n"
         "--xparam=<value> (-x): extra parameter to send to up/down scripts\n"       
+	"--udpu=address (-U <address>): target address for unicast UDP encapsulation (ip or ip:port)\n"
         "\n"
         "Sample usage:\n"
         "\n"
@@ -99,7 +99,6 @@ int main(int argc, char *argv[])
     if (argc <= 1) {
         usage();
     }        
-    inet_pton(AF_INET, DEFAULT_MCASTIP, &mcastip);
     while ((fodder = getopt_long(argc, argv, GETOPT_OPTIONS, long_options,
                                  &option_index)) != -1) {
         switch (fodder) {
@@ -118,13 +117,9 @@ int main(int argc, char *argv[])
                 logfile(LOG_ERR, _("Invalid address: [%s]"), optarg);
                 return 1;
             }
-            break;
-        }
-        case 'm': {
-            if (inet_pton(AF_INET, optarg, &mcastip) == 0) {
-                logfile(LOG_ERR, _("Invalid address: [%s]"), optarg);
-                return 1;
-            }
+		if ((srcip_str = strdup(optarg)) == NULL) {
+ 			die_mem();
+ 		}
             break;            
         }
         case 'v': {
@@ -196,8 +191,11 @@ int main(int argc, char *argv[])
             }
             break;
         }
-        case 'D': {
-            debug = 1;
+        case 't': {
+            free(upadvert);
+            if ((upadvert = strdup(optarg)) == NULL) {
+                die_mem();
+            }
             break;
         }
         case 'u': {
@@ -252,6 +250,35 @@ int main(int argc, char *argv[])
             no_mcast = 1;
             break;
         }
+	 case 'U': {
+		 int i = 0;
+ 	if ((udpu_addr = strdup(optarg)) == NULL) {
+ 		die_mem();
+ 	}
+ 		/* parse to get the port - can be: <ip> or <ip:port> */
+		 for(; udpu_addr[i]!='\0'; i++) {
+ 			if(udpu_addr[i]==':') {
+ 			break;
+ 			}
+ 		}
+ 		if(udpu_addr[i]==':') {
+ 		/* port */
+ 			udpu_addr[i]='\0';
+ 			i++;
+ 			udpu_port = 0;
+ 			for(; udpu_addr[i]!='\0'; i++) {
+ 				if(udpu_addr[i]<'0' || udpu_addr[i]>'9') {
+ 					logfile(LOG_ERR,
+ 				_		("unable to parse the address for UDP unicast"));
+ 					return 1;
+ 				}
+ 				udpu_port = 10*udpu_port+(unsigned int)(udpu_addr[i]-'0');
+ 			}
+ 		}
+ 		logfile(LOG_INFO, _("Using UDP unicast [%s:%u]"),
+ 		udpu_addr, udpu_port);
+ 		break;
+ 	}
         default: {
             usage();
         }
@@ -289,6 +316,9 @@ int main(int argc, char *argv[])
     if (vaddr.s_addr == 0) {
         logfile(LOG_ERR, _("You must supply a virtual host address"));
         return 1;
+    }
+    if (upadvert == NULL) {
+        logfile(LOG_WARNING, _("Warning: no script called when advertisement"));
     }
     if (upscript == NULL) {
         logfile(LOG_WARNING, _("Warning: no script called when going up"));

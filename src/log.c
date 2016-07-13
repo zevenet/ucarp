@@ -1,5 +1,4 @@
 #include <config.h>
-#include <sys/time.h>
 #include "ucarp.h"
 
 #ifdef WITH_DMALLOC
@@ -11,9 +10,6 @@ void logfile(const int crit, const char *format, ...)
     const char *urgency;    
     va_list va;
     char line[MAX_SYSLOG_LINE];
-
-    if (crit == LOG_DEBUG && ! debug)
-        return;
     
     va_start(va, format);
     vsnprintf(line, sizeof line, format, va);
@@ -46,31 +42,13 @@ void logfile(const int crit, const char *format, ...)
 #endif
     }    
     if (daemonize == 0) {
-        char timestr[200];
-        struct timeval tv;
-        struct tm *tmp;
-
-        if (gettimeofday(&tv, NULL)) {
-            perror("gettimeofday");
-            return;
-        }
-        if (!(tmp = localtime(&tv.tv_sec))) {
-            perror("localtime");
-            return;
-        }
-
-        if (strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S", tmp) == 0) {
-            fprintf(stderr, "strftime returned 0");
-            return;
-        }
-
         switch (crit) {
         case LOG_WARNING:
         case LOG_ERR:
-            fprintf(stderr, "%s.%06ld: %s%s\n", timestr, tv.tv_usec, urgency, line);
+            fprintf(stderr, "%s%s\n", urgency, line);
             break;
         default:
-            printf("%s.%06ld: %s%s\n", timestr, tv.tv_usec, urgency, line);
+            printf("%s%s\n", urgency, line);
         }
     }    
     va_end(va);

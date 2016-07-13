@@ -6,6 +6,8 @@ static struct timeval now;
 static pcap_t *dev_desc;
 static int dev_desc_fd = -1;
 static int carp_suppress_preempt;
+static int udpu_fd = -1;
+static struct sockaddr_in udpu_dest;
 
 static void carp_send_ad_all(struct carp_softc *sc);
 

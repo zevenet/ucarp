@@ -194,8 +194,9 @@ static void carp_send_ad(struct carp_softc *sc)
     int advskew;
     int rc;
 
+#ifdef DEBUG
     logfile(LOG_DEBUG, "-> carp_send_ad()");
-
+#endif
     advbase = sc->sc_advbase;
     if (carp_suppress_preempt == 0 ||
         sc->sc_advskew > CARP_BULK_UPDATE_MIN_DELAY) {
@@ -219,7 +220,8 @@ static void carp_send_ad(struct carp_softc *sc)
     eth_len = ip_len + sizeof eh;
     if ((pkt = ALLOCA(eth_len)) == NULL) {
         logfile(LOG_ERR, _("Out of memory to create packet"));
-        timeradd(&now, &tv, &sc->sc_ad_tmo);
+        sc->sc_ad_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+        sc->sc_ad_tmo.tv_usec = now.tv_usec + tv.tv_usec;            
         return;
     }
     ip.ip_v = IPVERSION;
@@ -237,7 +239,7 @@ static void carp_send_ad(struct carp_softc *sc)
     ip.ip_sum = 0;
     
     memcpy(&ip.ip_src, &srcip, sizeof ip.ip_src);    
-    memcpy(&ip.ip_dst.s_addr, &mcastip, sizeof ip.ip_dst.s_addr);
+    memcpy(&ip.ip_dst.s_addr, inaddr_carp_group, sizeof ip.ip_dst.s_addr);
     
     carp_prepare_ad(&ch, sc);       
     
@@ -245,8 +247,8 @@ static void carp_send_ad(struct carp_softc *sc)
     sum = cksum(&ch, sizeof ch);
     ch.carp_cksum = htons(sum);    
     
-    memcpy(&eh.ether_shost, hwaddr, sizeof hwaddr);
-    
+    memcpy(&eh.ether_shost, hwaddr, sizeof hwaddr); 
+	
     if (no_mcast) {
         eh.ether_dhost[0] = 0xff;
         eh.ether_dhost[1] = 0xff;
@@ -255,13 +257,12 @@ static void carp_send_ad(struct carp_softc *sc)
         eh.ether_dhost[4] = 0xff;
         eh.ether_dhost[5] = 0xff;        
     } else {
-        unsigned int m = ntohl(mcastip.s_addr);
         eh.ether_dhost[0] = 0x01;
         eh.ether_dhost[1] = 0x00;
         eh.ether_dhost[2] = 0x5e;
-        eh.ether_dhost[3] = m >> 16 & 0x7f;
-        eh.ether_dhost[4] = m >>  8 & 0xff;
-        eh.ether_dhost[5] = m       & 0xff;
+        eh.ether_dhost[3] = 0x00;
+        eh.ether_dhost[4] = 0x00;
+        eh.ether_dhost[5] = 0x12;        
     }    
     eh.ether_type = htons(ETHERTYPE_IP);    
     
@@ -275,7 +276,12 @@ static void carp_send_ad(struct carp_softc *sc)
     ip_ptr[offsetof(struct ip, ip_sum) + 1] = sum & 0xff;
 
     do {
-        rc = write(dev_desc_fd, pkt, eth_len);
+	if(udpu_addr==NULL) {
+		rc = write(dev_desc_fd, pkt, eth_len);
+	} else {
+		rc = sendto(udpu_fd, pkt, eth_len, 0,
+		(struct sockaddr *)&udpu_dest, sizeof(udpu_dest));
+	}
     } while (rc < 0 && errno == EINTR);
     if (rc < 0) {
         logfile(LOG_WARNING, _("write() has failed: %s"), strerror(errno));
@@ -283,8 +289,10 @@ static void carp_send_ad(struct carp_softc *sc)
             sc->sc_sendad_errors++;
         }
         if (sc->sc_sendad_errors == CARP_SENDAD_MAX_ERRORS) {
+#ifdef DEBUG
             logfile(LOG_ERR, _("write() error #%d/%d"),
                     carp_suppress_preempt, CARP_SENDAD_MAX_ERRORS);
+#endif            
             carp_suppress_preempt++;
             if (carp_suppress_preempt == 1) {
                 carp_send_ad_all(sc);
@@ -302,7 +310,9 @@ static void carp_send_ad(struct carp_softc *sc)
         }
     }
     
+#ifdef DEBUG
     logfile(LOG_DEBUG, _("* advertisement injected *"));
+#endif
     
     ALLOCA_FREE(pkt);
     
@@ -315,7 +325,8 @@ static void carp_send_ad(struct carp_softc *sc)
         sc->sc_delayed_arp = -1;
     }    
     if (advbase != 255 || advskew != 255) {
-        timeradd(&now, &tv, &sc->sc_ad_tmo);
+        sc->sc_ad_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+        sc->sc_ad_tmo.tv_usec = now.tv_usec + tv.tv_usec;            
         /* IPv6 ? */        
     }
 }
@@ -328,7 +339,9 @@ static void carp_setrun(struct carp_softc *sc, sa_family_t af)
 {
     struct timeval tv;    
     
+#ifdef DEBUG
     logfile(LOG_DEBUG, "carp_setrun()");
+#endif
     if (gettimeofday(&now, NULL) != 0) {
         logfile(LOG_WARNING, _("initializing now to gettimeofday() failed: %s"),
                 strerror(errno));
@@ -344,17 +357,21 @@ static void carp_setrun(struct carp_softc *sc, sa_family_t af)
         tv.tv_usec = (unsigned int) (sc->sc_advskew * 1000000ULL / 256ULL);
         switch (af) {        
         case AF_INET:
-            timeradd(&now, &tv, &sc->sc_md_tmo);
+            sc->sc_md_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+            sc->sc_md_tmo.tv_usec = now.tv_usec + tv.tv_usec;            
             break;
 #ifdef INET6
         case AF_INET6:
-            timeradd(&now, &tv, &sc->sc_md6_tmo);
+            sc->sc_md6_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+            sc->sc_md6_tmo.tv_usec = now.tv_usec + tv.tv_usec;            
             break;
 #endif /* INET6 */
         default:
-            timeradd(&now, &tv, &sc->sc_md_tmo);
+            sc->sc_md_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+            sc->sc_md_tmo.tv_usec = now.tv_usec + tv.tv_usec;
 #ifdef INET6
-            timeradd(&now, &tv, &sc->sc_md6_tmo);
+            sc->sc_md6_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+            sc->sc_md6_tmo.tv_usec = now.tv_usec + tv.tv_usec;
 #endif
             break;
         }        
@@ -362,7 +379,8 @@ static void carp_setrun(struct carp_softc *sc, sa_family_t af)
     case MASTER:
         tv.tv_sec = (unsigned int) sc->sc_advbase;
         tv.tv_usec = (unsigned int) (sc->sc_advskew * 1000000ULL / 256ULL);
-        timeradd(&now, &tv, &sc->sc_md_tmo);
+        sc->sc_md_tmo.tv_sec = now.tv_sec + tv.tv_sec;
+        sc->sc_md_tmo.tv_usec = now.tv_usec + tv.tv_usec;
         /* No IPv6 scheduling ? */
         break;
     }
@@ -370,10 +388,14 @@ static void carp_setrun(struct carp_softc *sc, sa_family_t af)
 
 static void carp_master_down(struct carp_softc *sc)
 {
+#ifdef DEBUG
     logfile(LOG_DEBUG, "carp_master_down()");
+#endif
     switch (sc->sc_state) {
     case INIT:
+#ifdef DEBUG
         logfile(LOG_DEBUG, _("master_down event in INIT state"));
+#endif
         break;
     case MASTER:
         break;
@@ -407,6 +429,7 @@ static void packethandler(unsigned char *dummy,
         return;
     }    
     memcpy(&etherhead, sp, sizeof etherhead);
+#ifdef DEBUG
     logfile(LOG_DEBUG, "Ethernet "
              "[%02x:%02x:%02x:%02x:%02x:%02x]->[%02x:%02x:%02x:%02x:%02x:%02x] "
              "type [%04x]",
@@ -423,6 +446,7 @@ static void packethandler(unsigned char *dummy,
             (unsigned int) etherhead.ether_dhost[4],
             (unsigned int) etherhead.ether_dhost[5],
             (unsigned int) ntohs(etherhead.ether_type));
+#endif
     sp += sizeof etherhead;
     caplen = header->caplen - sizeof etherhead;
     memcpy(&iphead, sp, sizeof iphead);    
@@ -440,6 +464,7 @@ static void packethandler(unsigned char *dummy,
         struct timeval sc_tv;
         struct timeval ch_tv;        
 
+#ifdef DEBUG
         logfile(LOG_DEBUG,
                 "\n---------------------------\n\n"
                 "carp [%d.%d.%d.%d] -> [%d.%d.%d.%d]",
@@ -447,11 +472,14 @@ static void packethandler(unsigned char *dummy,
                 source >> 8 & 0xff, source & 0xff,
                 dest >> 24 & 0xff, dest >> 16 & 0xff,
                 dest >> 8 & 0xff, dest & 0xff);
+#endif
         if (caplen < ip_len + sizeof ch) {
+#ifdef DEBUG
             logfile(LOG_DEBUG,
                     "Bogus size: caplen=[%u], ip_len=[%u] ch_len=[%u]",
                     (unsigned int) caplen, (unsigned int) ip_len,
                     (unsigned int) sizeof ch);
+#endif
             return;
         }
         memcpy(&ch, sp + ip_len, sizeof ch);
@@ -481,14 +509,11 @@ static void packethandler(unsigned char *dummy,
             return;
         }
         if (ch.carp_vhid != vhid) {
-            logfile(LOG_DEBUG, _("Ignoring vhid: [%u]"),
+#ifdef DEBUG
+            logfile(LOG_NOTICE, _("Ignoring vhid: [%u]"),
                     (unsigned int) ch.carp_vhid);
+#endif
             return;            
-        }
-        if (iphead.ip_dst.s_addr != mcastip.s_addr) {
-            logfile(LOG_DEBUG, _("Ignoring different multicast ip: [%s]"),
-                    inet_ntoa(iphead.ip_dst));
-            return;
         }
         if (cksum(sp, ip_len + sizeof ch) != 0) {
             logfile(LOG_WARNING, _("Bad IP checksum"));
@@ -545,9 +570,11 @@ static void packethandler(unsigned char *dummy,
         ch_tv.tv_usec = (unsigned int)
             (ch.carp_advskew * 1000000ULL / 256ULL);
         
+#ifdef DEBUG
         logfile(LOG_DEBUG, "sc_tv(local) = [%lu] ch_tv(remote) = [%lu]",
                 (unsigned long) sc_tv.tv_sec,
                 (unsigned long) ch_tv.tv_sec);
+#endif
         
         switch (sc.sc_state) {
         case INIT:
@@ -583,6 +610,7 @@ static void packethandler(unsigned char *dummy,
          iphead.ip_src.s_addr > srcip.s_addr)) {
         gratuitous_arp(dev_desc_fd);
         sc.sc_delayed_arp = 2; /* and yet another in 2 ticks */
+        (void) spawn_handler(dev_desc_fd, upadvert); /* execute action when advertisement*/
         logfile(LOG_WARNING, _("Non-preferred master advertising: "
                        "reasserting control of VIP with another gratuitous arp"));
             }
@@ -625,9 +653,57 @@ static void packethandler(unsigned char *dummy,
     }
 }     
 
+static void udpu_dispatch(void)
+{
+ struct pcap_pkthdr header;
+ unsigned char udpu_buf[1500];
+ struct sockaddr_in peeraddr;
+ unsigned int peeraddr_len = sizeof(peeraddr);
+ int rc;
+
+ rc = recvfrom(udpu_fd, udpu_buf, sizeof(udpu_buf), 0,
+ (struct sockaddr *)&peeraddr,
+ &peeraddr_len);
+ if (rc < 0)
+ {
+ logfile(LOG_WARNING, "recvfrom() failed [%d]", rc);
+ return;
+ }
+
+ logfile(LOG_DEBUG, "received frame size: <%d>\n", rc);
+ logfile(LOG_DEBUG, "from address %s and port %d\n",
+ inet_ntoa(peeraddr.sin_addr),
+ ntohs(peeraddr.sin_port));
+ /* todo: should check srcip and port although we have secret passwd */
+
+ memset(&header, 0, sizeof(struct pcap_pkthdr));
+ header.caplen = rc;
+ header.len = rc;
+#if 0
+/* timestamp seems to be unused */
+	if (gettimeofday(&header.ts, NULL) != 0) {
+ logfile(LOG_WARNING, _("gettimeofday() for udpu failed: %s"),
+ strerror(errno));
+ return;
+ }
+#endif
+ packethandler(NULL, &header, udpu_buf);
+}
+
+
+
+
 RETSIGTYPE sighandler_exit(const int sig)
 {
-    received_signal=15;
+    (void) sig;
+#ifdef DEBUG
+    logfile(LOG_DEBUG, "sighandler_exit(): Calling [%s] and exiting",
+            downscript);
+#endif
+    if (sc.sc_state != BACKUP) {
+        (void) spawn_handler(dev_desc_fd, downscript);
+    }
+    _exit(EXIT_SUCCESS);
 }
 
 RETSIGTYPE sighandler_usr(const int sig)
@@ -651,9 +727,20 @@ char *build_bpf_rule(void)
         logfile(LOG_ERR, "inet_ntoa: [%s]", strerror(errno));
         return NULL;
     }
-    snprintf(rule, sizeof rule, "proto %u and src host not %s",
+    
+	#if 0
+	/* use a pcap fitering rule that is very unlikely to match ?!? */
+	if(udpu_addr==NULL)
+		snprintf(rule, sizeof rule, "proto %u and src port 9 and src port 10",
+ 		(unsigned int) IPPROTO_CARP);
+	else
+#endif
+
+ 	snprintf(rule, sizeof rule, "proto %u and src host not %s",
              (unsigned int) IPPROTO_CARP, srcip_s);
+#ifdef DEBUG
     logfile(LOG_DEBUG, "BPF rule: [%s]", rule);
+#endif
     
     return rule;
 }
@@ -669,7 +756,8 @@ int docarp(void)
     int nfds;
     int iface_running = 1;
     int poll_sleep_time;
-    struct timeval sleep_time;
+    struct timeval time_until_advert;
+    struct sockaddr_in udpu_orig;
 
     sc.sc_vhid = vhid;
     sc.sc_advbase = advbase;
@@ -714,14 +802,17 @@ int docarp(void)
     }    
     if (pcap_compile(dev_desc, &bpfp, build_bpf_rule(),
                      1, (bpf_u_int32) 0) != 0) {
-        logfile(LOG_ERR, _("Unable to compile pcap rule: %s [%s]"),
-                errbuf, interface == NULL ? "-" : interface);
+	logfile(LOG_ERR, _("Unable to compile pcap rule: %s [%s] (%s)"),
+		errbuf, interface == NULL ? "-" : interface,
+			pcap_geterr(dev_desc));
         return -1;
     }
     pcap_setfilter(dev_desc, &bpfp);
     dev_desc_fd = pcap_fileno(dev_desc);
     pfds[0].fd = dev_desc_fd;
     pfds[0].events = POLLIN | POLLERR | POLLHUP;
+	pfds[0].revents = 0;
+	
     
     if (shutdown_at_exit != 0) {
         (void) signal(SIGINT, sighandler_exit);
@@ -744,7 +835,7 @@ int docarp(void)
     }
     if (!no_mcast) {
         memset(&req_add, 0, sizeof req_add);
-        req_add.imr_multiaddr.s_addr = mcastip.s_addr;
+        req_add.imr_multiaddr.s_addr = inet_addr("224.0.0.18");
         req_add.imr_interface.s_addr = srcip.s_addr;
         if (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                        &req_add, sizeof req_add) < 0) {
@@ -754,6 +845,42 @@ int docarp(void)
             return -1;
         }
     }
+
+ if(udpu_addr!=NULL) {
+ /* socket for udpu communication */
+ if ((udpu_fd = socket(PF_INET, SOCK_DGRAM, 0)) == -1) {
+ logfile(LOG_ERR, _("Error opening socket for udpu on [%s]: %s"),
+ interface == NULL ? "-" : interface, strerror(errno));
+ return -1;
+ }
+
+ /* bind to local interface and port */
+ memset(&udpu_orig, 0, sizeof(struct sockaddr_in));
+ udpu_orig.sin_family = AF_INET;
+ udpu_orig.sin_addr.s_addr = inet_addr(srcip_str);
+ udpu_orig.sin_port = htons(udpu_port);
+ if (bind(udpu_fd, (struct sockaddr *)&udpu_orig,
+ sizeof(struct sockaddr_in)) == -1)
+ {
+ logfile(LOG_ERR,
+ "Can't do bind to local socket (%s:%u) [errno=%s (%d)]",
+ srcip_str, udpu_port,
+ strerror(errno), errno);
+ close(udpu_fd);
+ return -1;
+ }
+ /* build udpu destination address */
+ memset(&udpu_dest, 0, sizeof(struct sockaddr_in));
+ udpu_dest.sin_family = AF_INET;
+ udpu_dest.sin_addr.s_addr = inet_addr(udpu_addr);
+ udpu_dest.sin_port = htons(udpu_port);
+
+ /* poll switched to listen on this socket */
+ pfds[0].fd = udpu_fd;
+}
+
+
+
 #ifdef SIOCGIFFLAGS    
     if (strlen(interface) >= sizeof iface.ifr_name) {
         logfile(LOG_ERR, _("Interface name too long"));
@@ -762,7 +889,6 @@ int docarp(void)
     strncpy(iface.ifr_name, interface, sizeof iface.ifr_name);
 #endif    
     for (;;) {
-        struct timeval pre_poll;
 #ifdef SIOCGIFFLAGS
         if (ioctl(fd, SIOCGIFFLAGS, &iface) != 0) {
             break;
@@ -798,7 +924,9 @@ int docarp(void)
             interface, sc.sc_vhid);
         break;
         case 2:
+#ifdef DEBUG
         logfile(LOG_DEBUG, "Caught signal (USR2) considering going down");
+#endif
         if (sc.sc_state != BACKUP) {
             carp_set_state(&sc, BACKUP);
             sleep(3); /* hold up a sec... */
@@ -806,40 +934,22 @@ int docarp(void)
             continue;
         }
         break;
-        case 15:
-        logfile(LOG_DEBUG, "sighandler_exit(): Calling [%s] and exiting",
-                downscript);
-        if (sc.sc_state != BACKUP) {
-            (void) spawn_handler(dev_desc_fd, downscript);
-        }
-        _exit(EXIT_SUCCESS);
-        break;
-
             }
         }
 
-        if (gettimeofday(&pre_poll, NULL) != 0) {
-            logfile(LOG_WARNING, _("gettimeofday() failed: %s"),
-                    strerror(errno));
-        }
         if (sc.sc_ad_tmo.tv_sec == 0) {
-            timersub(&sc.sc_md_tmo, &pre_poll, &sleep_time);
+            poll_sleep_time = sc.sc_advbase * 1000;
         } else {
-            timersub(&sc.sc_ad_tmo, &pre_poll, &sleep_time);
+            if (gettimeofday(&now, NULL) != 0) {
+                logfile(LOG_WARNING, _("gettimeofday() failed: %s"),
+                        strerror(errno));
+                continue;
+            }
+            timersub(&sc.sc_ad_tmo, &now, &time_until_advert);
+            poll_sleep_time = (time_until_advert.tv_sec * 1000) +
+                (time_until_advert.tv_usec / 1000);
         }
-        poll_sleep_time = (sleep_time.tv_sec * 1000) +
-            (sleep_time.tv_usec / 1000);
-        logfile(LOG_DEBUG, _("entering poll for %d ms"),
-                poll_sleep_time);
-
         nfds = poll(pfds, (nfds_t) 1, MAX(1, poll_sleep_time));
-        if (gettimeofday(&now, NULL) != 0) {
-            logfile(LOG_WARNING, _("gettimeofday() failed: %s"),
-                    strerror(errno));
-        }
-        logfile(LOG_DEBUG, "exited poll after %d us",
-                1000000 * (now.tv_sec - pre_poll.tv_sec) +
-                now.tv_usec - pre_poll.tv_usec);
         if (nfds == -1) {
             if (errno == EINTR) {
                continue;
@@ -851,8 +961,16 @@ int docarp(void)
                     pfds[0].revents);
             break;
         }
+        if (gettimeofday(&now, NULL) != 0) {
+            logfile(LOG_WARNING, _("gettimeofday() failed: %s"),
+                    strerror(errno));
+            continue;
+        }        
         if (nfds == 1) {
-            pcap_dispatch(dev_desc, 1, packethandler, NULL);
+		if(udpu_addr==NULL)
+		pcap_dispatch(dev_desc, 1, packethandler, NULL);
+	 else
+		udpu_dispatch();
         }
         if (sc.sc_md_tmo.tv_sec != 0 && timercmp(&now, &sc.sc_md_tmo, >)) {
             carp_master_down(&sc);
@@ -866,9 +984,9 @@ int docarp(void)
            if (timercmp(&now, &sc.sc_ad_tmo, >)) {
                 carp_send_ad(&sc);
            } else {
-               timersub(&sc.sc_ad_tmo, &now, &sleep_time);
-               int diff_ms = (sleep_time.tv_sec * 1000) +
-                   (sleep_time.tv_usec / 1000);
+               timersub(&sc.sc_ad_tmo, &now, &time_until_advert);
+               int diff_ms = (time_until_advert.tv_sec * 1000) +
+                   (time_until_advert.tv_usec / 1000);
                if (abs(diff_ms) <= 1) {
                     carp_send_ad(&sc);
                }

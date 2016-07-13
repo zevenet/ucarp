@@ -114,6 +114,8 @@ extern int errno;
 # define __packed__
 #endif
 
+#define _COMA_ ,
+
 #define ETHERNET_MTU 1500
 #ifndef ETHER_ADDR_LEN
 # define ETHER_ADDR_LEN 6
@@ -211,7 +213,6 @@ struct carp_softc {
 #define CARP_AUTHLEN 7
 #define DEFAULT_ADVBASE 1U
 #define DEFAULT_DEAD_RATIO 3U
-#define DEFAULT_MCASTIP "224.0.0.18"
 #define SECONDS_TO_WAIT_AFTER_INTERFACE_IS_DOWN 10U
 
 #define DEFAULT_FACILITY LOG_DAEMON
